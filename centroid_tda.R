@@ -41,6 +41,7 @@ doTDA <-function(fname, sname){
   
   title("PA VTD Topology", outer = TRUE)
   
-  #save stuff
+  
+  #save objects
   saveRDS(DiagAlphaShape, file = sprintf("%sDiag", state), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
 }
