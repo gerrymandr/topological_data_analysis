@@ -41,7 +41,7 @@ doTDA <-function(fname, sname){
   plot(DiagAlphaShape[["diagram"]], main = "Persistance")
   plot(DiagAlphaShape[["diagram"]], barcode = TRUE, main = "Barcode")
   
-  title("PA VTD Topology", outer = TRUE)
+  title(paste(toupper(sname), "VTD Topology", sep = " ", collapse = NULL), outer = TRUE)
   dev.off()
   
   #save objects
