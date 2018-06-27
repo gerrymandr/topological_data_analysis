@@ -9,6 +9,7 @@ doTDA <-function(fname, sname){
                                      library = c("GUDHI", "Dionysus"), printProgress = TRUE, location = TRUE)
   
   #plot stuff
+  png(file="vtd_topology_pa.png",width=1200,height=400)
   par(mfrow=c(1,3))
   par(oma=c(0,0,2,0))
   
@@ -40,6 +41,7 @@ doTDA <-function(fname, sname){
   plot(DiagAlphaShape[["diagram"]], barcode = TRUE, main = "Barcode")
   
   title("PA VTD Topology", outer = TRUE)
+  dev.off()
   
   #save stuff
   saveRDS(DiagAlphaShape, file = sprintf("%sDiag", state), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
