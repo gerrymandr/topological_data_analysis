@@ -9,7 +9,7 @@ doTDA <-function(fname, sname){
                                      library = c("GUDHI", "Dionysus"), printProgress = TRUE, location = TRUE)
   
   #plot stuff
-  png(file=sprintf("vtd_topology_%s.png", state),width=1200,height=400)
+  png(file=sprintf("vtd_topology_%s.png", sname),width=1200,height=400)
   par(mfrow=c(1,3))
   par(oma=c(0,0,2,0))
   
@@ -44,5 +44,5 @@ doTDA <-function(fname, sname){
   dev.off()
   
   #save objects
-  saveRDS(DiagAlphaShape, file = sprintf("%sDiag", state), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
+  saveRDS(DiagAlphaShape, file = sprintf("%sDiag", sname), ascii = FALSE, version = NULL, compress = TRUE, refhook = NULL)
 }
