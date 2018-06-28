@@ -1,9 +1,9 @@
 library("TDA")
-
+#DONT FORGET THAT YOU SKIPED OREGON!!
 doTDA <-function(fname, sname){
   #Read in centroids of vtds
   X <- read.table(fname, sep = " ")
-  X <- X[,c(2,3)]
+  # X <- X[,c(2,3)]
 
   #compute filtration and homology
   DiagAlphaShape <- alphaComplexDiag(X = X, maxdimension = 1,
