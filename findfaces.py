@@ -53,12 +53,11 @@ def find_faces(G, nbr_lists):
                     hunt = False
                 else:
                     pivot = dart[1]
-                    print(pivot)
                     nbr_list = nbr_lists[pivot]
                     index = nbr_list.index(dart[0])
                     new_index = (index+1)%len(nbr_list)
                     dart = (pivot, nbr_list[new_index])
-            faces.add(tuple(set(face)))
+            faces.add(tuple(face[:len(face)-1]))
 #    print(len(faces))
     return faces
 
