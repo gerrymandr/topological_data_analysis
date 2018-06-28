@@ -1,5 +1,4 @@
 library("TDA")
-#DONT FORGET THAT YOU SKIPED OREGON!!
 doTDA <-function(fname, sname){
   #Read in centroids of vtds
   X <- read.table(fname, sep = " ")
