@@ -11,31 +11,46 @@ import math
 import csv
 
 
-def findangle(y,x):
+def find_angle(y,x):
+    """Find angle of a vector with respect to x axis"""
     theta = math.atan(y/x)
     if x<0:
         theta = theta + math.pi
     return theta
 
 
-def genclockwiseneighbors(G,latstring,lonstring):
-    clockwisenbrlist={}
+def gen_cclockwise_neighbors(G,xstring,ystring):
+    """Puts neighbors of every vertex in clockwise order
+
+    :param G: networkx graph with nodes indexed by GeoID, as well as coordinates for each node
+    :param xstring: string key for x coordinate in G
+    :param ystring: string key for y coordinate in G
+    :return: dictionary where keys are GeoIDs for each node, and values are a list of neighbors in
+        counterclockwise order
+    """
+    cclockwisenbrlist={}
     for node in G.nodes():
-        coord = np.array([float(G.nodes[node][latstring]),float(G.nodes[node][lonstring])])
+        coord = np.array([float(G.nodes[node][xstring]),float(G.nodes[node][ystring])])
         neighbors = G.neighbors(node)
         angles = []
         nbrs = []
         for n in neighbors:
-            nbrcoord = np.array([float(G.nodes[n][latstring]), float(G.nodes[n][lonstring])])
+            nbrcoord = np.array([float(G.nodes[n][xstring]), float(G.nodes[n][ystring])])
             u = nbrcoord-coord
-            theta = findangle(u[1],u[0])
+            theta = find_angle(u[1],u[0])
             angles.append(theta)
             nbrs.append(str(n))
-        clockwisenbrlist[node]=[n for _,n in sorted(zip(angles,nbrs))]
-    return clockwisenbrlist
+        cclockwisenbrlist[node]=[n for _,n in sorted(zip(angles,nbrs))]
+    return cclockwisenbrlist
 
 
 def find_faces(G, nbr_lists):
+    """Finds faces of a mostly planar graph G
+
+    :param G: networkx graph
+    :param nbr_lists: dictionary mapping GeoIDs to lists of neighbors in counter-clockwise order
+    :return: dictionary mapping indexed faces to a list of GeoIDs for vertices of that face in counter-clockwise order
+    """
     edges = ((u,v) for u,v,d in G.edges(data=True))
     verse = ((v,u) for u,v,d in G.edges(data=True))
     darts = list(chain(edges, verse))
@@ -90,6 +105,13 @@ def get_dist_to_boundary(G, district):
     return G
 
 def gettriangles(face,verts):
+    """For a face with more than 3 vertices, breaks face into triangles
+
+    :param face: string ID for the face
+    :param verts: list of GeoIDs of vertices in the face in counterclockwise order
+    :return: trianglelist, a dictionary mapping triangle IDs to a list of vertices in each triangle, where triangles
+        roughly triangulate the face
+    """
     trianglelist={}
     numverts = len(verts)
     if numverts > 3:
@@ -100,6 +122,11 @@ def gettriangles(face,verts):
     return trianglelist
 
 def get_edge_dict(G):
+    """assign each edge in a graph a string index and get the GeoIDs of endpoints
+
+    :param G: networkx graph indexed by GeoID
+    :return: dictionary mapping unique edge indexes to the GeoIDs of their endpoints
+    """
     edge_dict={}
     idx = 0
     for e in list(G.edges()):
@@ -109,6 +136,17 @@ def get_edge_dict(G):
     return edge_dict
 
 def get_dims_and_idx(G,edgedict,faces):
+    """Build dictionaries that give an order for the entry of every simplex into the filtered simplicial complex
+
+    :param G: networkx graph
+    :param edgedict: dictionary mapping unique edge indexes to the GeoIDs of their endpoints
+    :param faces: dictionary mapping indexed faces to a list of GeoIDs for vertices of that face in
+        counter-clockwise order
+    :return:
+        dims: dictionary mapping the ID of each simplex to its dimension
+        indexes: dictionary mapping the ID of each simplex to the order in which it enters the simplex
+        tridict: dictionary mapping triangles (2-simplexes) to the list of GeoIDs of their vertices
+    """
     disttobd = nx.get_node_attributes(G,'dist_to_boundary')
     maxdist = max(list(disttobd.values()))
     idx = 0
@@ -147,6 +185,12 @@ def get_dims_and_idx(G,edgedict,faces):
     return dims, indexes, tridict
 
 def lookup_edge_key(verts,edgedict):
+    """from two vertices, find the edge ID of the edge between them
+
+    :param verts: list of two GeoIDs
+    :param edgedict: dictionary mapping edge IDs to GeoIDs of their endpoints
+    :return: edge ID of the edge between the vertices given by verts
+    """
     for e, everts in edgedict.items():
         if set(everts) == set(verts):
             return e
@@ -155,6 +199,15 @@ def lookup_edge_key(verts,edgedict):
 
 
 def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
+    """write filtered simplicial complex to .dat file
+
+    :param filename: filename of the output file
+    :param dims: dictionary mapping simplex IDs to their dimensions
+    :param indexes: dictionary giving order in which simplex IDs enter the filtered simplicial complex
+    :param edgedict: dictionary mapping edge IDs to GeoIDs of their endpoints
+    :param tridict: dictionary mapping triangles (2-simplexes) to the list of GeoIDs of their vertices
+    :return: 
+    """
     sortedkeys = sorted(indexes, key=indexes.get)
     file = open(filename,"w")
     for key in sortedkeys:
@@ -175,8 +228,8 @@ def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
 
 G = nx.read_gexf('wytestgraph2.gexf')
 get_dist_to_boundary(G,'00')
-nbr_list = genclockwiseneighbors(G,"INTPTLAT","INTPTLON")
+nbr_list = gen_cclockwise_neighbors(G,"INTPTLAT","INTPTLON")
 edict = get_edge_dict(G)
 faces = find_faces(G,nbr_list)
 dims,idxs,tridict = get_dims_and_idx(G,edict,faces)
-write_simplicial_complex("testsc.dat",dims,idxs,edict,tridict)
+write_simplicial_complex("wytestsc.dat",dims,idxs,edict,tridict)
