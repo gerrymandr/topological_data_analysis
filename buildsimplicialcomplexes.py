@@ -9,6 +9,7 @@ from itertools import chain
 import numpy as np
 import math
 import csv
+import dionysus as d
 
 
 def find_angle(y,x):
@@ -104,22 +105,32 @@ def get_dist_to_boundary(G, district):
             G.node[target_node]['dist_to_boundary'] = updated_dist if updated_dist < current_dist else current_dist
     return G
 
-def gettriangles(face,verts):
+def gettriangles(face,verts,edgedict):
     """For a face with more than 3 vertices, breaks face into triangles
 
     :param face: string ID for the face
     :param verts: list of GeoIDs of vertices in the face in counterclockwise order
+    :param edgedict: dictionary mapping unique edge indexes to the GeoIDs of their endpoints
     :return: trianglelist, a dictionary mapping triangle IDs to a list of vertices in each triangle, where triangles
         roughly triangulate the face
     """
     trianglelist={}
     numverts = len(verts)
+    newedges = []
     if numverts > 3:
         for subidx in range(numverts-2):
-            trianglelist[face+str(subidx)]=[verts[0],verts[subidx+1],verts[subidx+2]]
+            if(len(set([verts[0],verts[subidx+1],verts[subidx+2]])))>3:
+            # if True:
+                trianglelist[face+str(subidx)]=[verts[0],verts[subidx+1],verts[subidx+2]]
+                if lookup_edge_key([verts[0],verts[subidx+2]],edgedict)==0:
+                    edgedict["E"+face+str(subidx)]=[verts[0],verts[subidx+2]]
+                    # print([verts[0],verts[subidx+2]])
+                    newedges.append("E"+face+str(subidx))
     else:
-        trianglelist[face]=verts
-    return trianglelist
+        if len(set(verts))==3:
+        # if True:
+            trianglelist[face]=verts
+    return trianglelist,newedges
 
 def get_edge_dict(G):
     """assign each edge in a graph a string index and get the GeoIDs of endpoints
@@ -154,15 +165,15 @@ def get_dims_and_idx(G,edgedict,faces):
     indexes = {}
     rem_edges=edgedict.copy()
     rem_faces=faces.copy()
-    nodes = list(G)
     done_nodes = []
     tridict={}
-    for currdist in range(maxdist):
+    time={}
+    for currdist in range(maxdist+1):
         nodes = [key for key,value in disttobd.items() if value==currdist]
         for node in nodes:
             dims[node] = 0
+            time[node] = currdist
             indexes[node] = idx
-            nodes.remove(node)
             done_nodes.append(node)
             idx+=1
             for e in list(rem_edges):
@@ -170,19 +181,26 @@ def get_dims_and_idx(G,edgedict,faces):
                 if len(set(everts) & set(done_nodes))==2:
                     dims[e]=1
                     indexes[e] = idx
+                    time[e] = currdist
                     rem_edges.pop(e)
                     idx+=1
             for f in list(rem_faces):
                 fverts = rem_faces[f]
-                if len(set(fverts) & set(done_nodes)) == len(fverts):
-                    trilist = gettriangles(f,fverts)
+                if len(set(fverts) & set(done_nodes)) == len(set(fverts)):
+                    trilist, newedges = gettriangles(f,fverts,edgedict)
+                    for e in newedges:
+                        dims[e]=1
+                        indexes[e] = idx
+                        time[e] = currdist
+                        idx+=1
                     for t, tverts in trilist.items():
                         dims[t] = 2
                         indexes[t] = idx
+                        time[t] = currdist
                         idx+=1
                         tridict[t] = tverts
                     rem_faces.pop(f)
-    return dims, indexes, tridict
+    return dims, indexes, tridict, time
 
 def lookup_edge_key(verts,edgedict):
     """from two vertices, find the edge ID of the edge between them
@@ -194,8 +212,23 @@ def lookup_edge_key(verts,edgedict):
     for e, everts in edgedict.items():
         if set(everts) == set(verts):
             return e
-    print('Error: No Match Found.')
     return 0
+
+def build_filtered_complex(dims, indexes, edgedict, tridict, time):
+    sortedkeys = sorted(indexes, key=indexes.get)
+    f = d.Filtration()
+    for key in sortedkeys:
+        if dims[key]==0:
+            f.append(d.Simplex([indexes[key]],time[key]))
+        elif dims[key]==1:
+            verts = edgedict[key]
+            vertices = [indexes[v] for v in verts]
+            f.append(d.Simplex(vertices, time[key]))
+        elif dims[key]==2:
+            verts = tridict[key]
+            vertices = [indexes[v] for v in verts]
+            f.append(d.Simplex(vertices, time[key]))
+    return f
 
 
 def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
@@ -206,7 +239,7 @@ def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
     :param indexes: dictionary giving order in which simplex IDs enter the filtered simplicial complex
     :param edgedict: dictionary mapping edge IDs to GeoIDs of their endpoints
     :param tridict: dictionary mapping triangles (2-simplexes) to the list of GeoIDs of their vertices
-    :return: 
+    :return:
     """
     sortedkeys = sorted(indexes, key=indexes.get)
     file = open(filename,"w")
@@ -231,5 +264,33 @@ get_dist_to_boundary(G,'00')
 nbr_list = gen_cclockwise_neighbors(G,"INTPTLAT","INTPTLON")
 edict = get_edge_dict(G)
 faces = find_faces(G,nbr_list)
-dims,idxs,tridict = get_dims_and_idx(G,edict,faces)
-write_simplicial_complex("wytestsc.dat",dims,idxs,edict,tridict)
+dims,idxs,tridict, time = get_dims_and_idx(G,edict,faces)
+filtration = build_filtered_complex(dims, idxs, edict, tridict, time)
+
+
+# for s in filtration:
+#     print(s)
+m = d.homology_persistence(filtration)
+
+# dgms = d.init_diagrams(m,filtration)
+# for i, dgm in enumerate(dgms):
+#     for pt in dgm:
+#         print(i, pt.birth, pt.death)
+
+for i,c in enumerate(m):
+    if m.pair(i) < i: continue
+    dim = filtration[i].dimension()
+    if m.pair(i) != m.unpaired:
+        birth=filtration[i].data
+        death=filtration[m.pair(i)].data
+        if birth!=death:
+            print(dim,birth,death,c)
+    else:
+        print(dim,filtration[i].data,'inf',c)
+
+# for i,c in enumerate(m):
+#     print(i,c)
+# d.plot.plot_bars(dgms[1], show=True)
+#
+# for s in filtration:
+#     print(s)
