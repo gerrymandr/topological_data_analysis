@@ -1,7 +1,7 @@
 """
 Created on Thu Jun 28 15:22:51 2018
 
-@author: eion + michelle + austin + corey
+@author: eion + michelle + austin + cory
 """
 
 import networkx as nx
@@ -208,6 +208,8 @@ def get_dims_and_idx(G,edgedict,faces):
                     rem_faces.pop(f)
     return dims, indexes, tridict, time
 
+
+
 def lookup_edge_key(verts,edgedict):
     """from two vertices, find the edge ID of the edge between them
 
@@ -235,7 +237,6 @@ def build_filtered_complex(dims, indexes, edgedict, tridict, time):
             vertices = [indexes[v] for v in verts]
             f.append(d.Simplex(vertices, time[key]))
     return f
-
 
 def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
     """write filtered simplicial complex to .dat file
@@ -265,70 +266,79 @@ def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
 
     file.close()
 
-#### ---CHANGE--- insert correct gexf
+def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
+    """generate plot of colorcoded simplexes by distance from boundary
+
+    :param G: network which must contain distance to boundary
+    :param xstring:
+    :param ystring:
+    :param edgedict: dictionary of all edges and contained vertices
+    :param triangledict: dictionary of all triangles and contained vertices
+    :return:
+    """
+    colorlist = []
+    for n in G.nodes():
+        G.node[n]['pos'] = (float(G.node[n][xstring]), float(G.node[n][ystring]))
+        colorlist.append(float(G.node[n]['dist_to_boundary']))
+
+    pos = nx.get_node_attributes(G, 'pos')
+    nppos = np.array([val for k, val in pos.items()])
+    xmin, ymin = np.min(nppos, 0)
+    xmax, ymax = np.max(nppos, 0)
+    disttobd = nx.get_node_attributes(G, 'dist_to_boundary')
+    maxdist = max(list(disttobd.values()))
+
+    clist = ['k'] * (maxdist + 1)
+    clist[0] = 'r'
+    clist[1] = 'b'
+    clist[2] = 'g'
+    clist[3] = 'c'
+    clist[4] = 'm'
+    clist[5] = 'y'
+    fig, ax = plt.subplots()
+    for currdist in range(maxdist + 1):
+        boundary = [k for k, val in time.items() if val == currdist]
+        boundarytri = [k for k in boundary if dims[k] == 2]
+        boundaryedges = [k for k in boundary if dims[k] == 1]
+        boundaryverts = [k for k in boundary if dims[k] == 0]
+        patches = []
+        points = np.array([np.array(pos[k]) for k in boundaryverts])
+        plt.scatter(points[:, 0], points[:, 1], s=5, c=clist[currdist], alpha=0.4)
+        for e in boundaryedges:
+            verts = edgedict[e]
+            beg = np.array(pos[verts[0]])
+            end = np.array(pos[verts[1]])
+            line = mlines.Line2D(np.array([beg[0], end[0]]), np.array([beg[1], end[1]]), lw=1., alpha=0.4,
+                                 c=clist[currdist])
+            ax.add_line(line)
+        for t in boundarytri:
+            poly = np.zeros((3, 2))
+            verts = triangledict[t]
+            for i in np.arange(3):
+                poly[i, :] = np.array(pos[verts[i]])
+            triangle = Polygon(poly, True)
+            patches.append(triangle)
+        p = PatchCollection(patches, alpha=0.4)
+        p.set_color(clist[currdist])
+        ax.add_collection(p)
+    plt.axis([xmin, xmax, ymin, ymax])
+
+    plt.show(block=True)
+
+
 G = nx.read_gexf('wytestgraph2.gexf')
 
 get_dist_to_boundary(G,'00')
-colorlist=[]
-### ---CHANGE--- insert correct strings for intptlon and intptlat fields
-for n in G.nodes():
-    G.node[n]['pos']=(float(G.node[n]['INTPTLON']),float(G.node[n]['INTPTLAT']))
-    colorlist.append(float(G.node[n]['dist_to_boundary']))
-# plt.show(block=True)
 
-### ---CHANGE--- insert correct strings for intptlon and intptlat fields
 nbr_list = gen_cclockwise_neighbors(G,"INTPTLON","INTPTLAT")
 edict = get_edge_dict(G)
 faces = find_faces(G,nbr_list)
 dims,idxs,tridict, time = get_dims_and_idx(G,edict,faces)
 
-pos = nx.get_node_attributes(G,'pos')
-nppos = np.array([val for k,val in pos.items()])
-xmin, ymin = np.min(nppos,0)
-xmax, ymax = np.max(nppos,0)
-disttobd = nx.get_node_attributes(G,'dist_to_boundary')
-maxdist = max(list(disttobd.values()))
-
-clist=['k']*(maxdist+1)
-clist[0]='r'
-clist[1]='b'
-clist[2]='g'
-clist[3]='c'
-clist[4]='m'
-clist[5]='y'
-print(clist)
-fig,ax = plt.subplots()
-for currdist in range(maxdist+1):
-    boundary = [k for k,val in time.items() if val==currdist]
-    boundarytri = [k for k in boundary if dims[k]==2]
-    boundaryedges = [k for k in boundary if dims[k]==1]
-    boundaryverts = [k for k in boundary if dims[k]==0]
-    patches = []
-    points = np.array([np.array(pos[k]) for k in boundaryverts])
-    plt.scatter(points[:,0],points[:,1],s=5,c=clist[currdist],alpha=0.4)
-    for e in boundaryedges:
-        verts = edict[e]
-        beg = np.array(pos[verts[0]])
-        end = np.array(pos[verts[1]])
-        line=mlines.Line2D(np.array([beg[0],end[0]]), np.array([beg[1],end[1]]),lw=1.,alpha=0.4,c=clist[currdist])
-        ax.add_line(line)
-    for t in boundarytri:
-        poly=np.zeros((3,2))
-        verts = tridict[t]
-        for i in np.arange(3):
-            poly[i,:] = np.array(pos[verts[i]])
-        triangle = Polygon(poly,True)
-        patches.append(triangle)
-    p = PatchCollection(patches,alpha=0.4)
-    p.set_color(clist[currdist])
-    ax.add_collection(p)
-plt.axis([xmin, xmax, ymin, ymax])
-
-# nx.draw(G,pos=nx.get_node_attributes(G,'pos'),node_size=30,width=5)
-plt.show(block=True)
-
 
 filtration = build_filtered_complex(dims, idxs, edict, tridict, time)
+
+plot_simplexes(G,'INTPTLON','INTPTLAT',edict,tridict)
 
 
 # for s in filtration:
