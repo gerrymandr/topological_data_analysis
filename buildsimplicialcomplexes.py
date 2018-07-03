@@ -208,8 +208,6 @@ def get_dims_and_idx(G,edgedict,faces):
                     rem_faces.pop(f)
     return dims, indexes, tridict, time
 
-
-
 def lookup_edge_key(verts,edgedict):
     """from two vertices, find the edge ID of the edge between them
 
@@ -221,6 +219,15 @@ def lookup_edge_key(verts,edgedict):
         if set(everts) == set(verts):
             return e
     return 0
+
+def check_face(face,edgedict):
+    for i in range(len(face)):
+        edge = [face[i], face[(i+1)%len(face)]]
+        if lookup_edge_key(edge,edgedict)!=0:
+            return True
+        return False
+
+def     
 
 def build_filtered_complex(dims, indexes, edgedict, tridict, time):
     sortedkeys = sorted(indexes, key=indexes.get)
