@@ -14,7 +14,9 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from matplotlib.collections import PatchCollection
 import matplotlib.lines as mlines
+import matplotlib.cm
 import numpy as np
+from scipy.spatial.distance import pdist
 
 
 def find_angle(y,x):
@@ -138,6 +140,23 @@ def gettriangles(face,verts,edgedict):
             trianglelist[face]=verts
     return trianglelist,newedges
 
+def triangulate_faces(facedict):
+    triangledict = {}
+    idx = 0
+    for f in facedict:
+        if len(set(facedict[f])) == 3:
+            triangledict["T" + str(idx)] = facedict[f]
+            idx += 1
+        elif len(set(facedict[f])) > 3:
+            verts = facedict[f]
+            numverts = len(verts)
+            for subidx in range(numverts-2):
+                testtri = [verts[0], verts[subidx+1], verts[subidx+2]]
+                if len(set(testtri)) == 3:
+                    triangledict["T" + str(idx)] = facedict[f]
+                    idx += 1
+    return triangledict
+
 def get_edge_dict(G):
     """assign each edge in a graph a string index and get the GeoIDs of endpoints
 
@@ -208,6 +227,49 @@ def get_dims_and_idx(G,edgedict,faces):
                     rem_faces.pop(f)
     return dims, indexes, tridict, time
 
+def get_dims_and_idx_from_multiple(Gedge, faces, maxfiltration, numfiltrations):
+    filtrationwidth = maxfiltration/numfiltrations
+    nodes = Gedge.nodes()
+    rem_edges = nx.get_edge_attributes(Gedge,'weight')
+    rem_faces = faces.copy()
+    done_edges = {}
+    idx = 0
+    dims = {}
+    idxs = {}
+    times = {}
+    for n in nodes:
+        dims[n] = 0
+        idxs[n] = idx
+        times[n] = 0
+        idx += 1
+    for currdist in range(numfiltrations):
+        currfilt = (currdist+1)*filtrationwidth
+        for e in list(rem_edges.keys()):
+            if rem_edges[e] < currfilt:
+                dims[e] = 1
+                idxs[e] = idx
+                times[e] = currdist
+                idx += 1
+                done_edges[e]=rem_edges[e]
+                rem_edges.pop(e)
+        for f in list(rem_faces.keys()):
+            if check_face(rem_faces[f], done_edges) == True:
+                # if e == ('11001009601','11001009602'):
+                #     print("Here")
+                fidx = tuple(rem_faces[f])
+                dims[fidx] = 2
+                idxs[fidx] = idx
+                times[fidx] = currdist
+                idx += 1
+                rem_faces.pop(f)
+    return dims, idxs, times
+
+def lookup_edge_key_2(e, edgedict):
+    for edge in edgedict.keys():
+        if set(e) == set(edge):
+            return edge
+    return 0
+
 def lookup_edge_key(verts,edgedict):
     """from two vertices, find the edge ID of the edge between them
 
@@ -220,14 +282,10 @@ def lookup_edge_key(verts,edgedict):
             return e
     return 0
 
-def check_face(face,edgedict):
-    for i in range(len(face)):
-        edge = [face[i], face[(i+1)%len(face)]]
-        if lookup_edge_key(edge,edgedict)!=0:
-            return True
-        return False
-
-def     
+def check_face(faceverts,edgedict):
+    if lookup_edge_key_2([faceverts[0], faceverts[1]], edgedict) != 0 and lookup_edge_key_2([faceverts[1], faceverts[2]], edgedict) != 0 and lookup_edge_key_2([faceverts[0], faceverts[2]], edgedict) != 0:
+        return True
+    return False
 
 def build_filtered_complex(dims, indexes, edgedict, tridict, time):
     sortedkeys = sorted(indexes, key=indexes.get)
@@ -332,45 +390,136 @@ def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
 
     plt.show(block=True)
 
+def plot_simplexes_from_multiple(G_edge,dims,times):
+    """generate plot of colorcoded simplexes by distance from boundary
 
-G = nx.read_gexf('wytestgraph2.gexf')
+    :param G: network which must contain distance to boundary
+    :param xstring:
+    :param ystring:
+    :param edgedict: dictionary of all edges and contained vertices
+    :param triangledict: dictionary of all triangles and contained vertices
+    :return:
+    """
 
-get_dist_to_boundary(G,'00')
+    pos = nx.get_node_attributes(G_edge, 'pos')
+    nppos = np.array([val for k, val in pos.items()])
+    xmin, ymin = np.min(nppos, 0)
+    xmax, ymax = np.max(nppos, 0)
+    maxdist = max(list(times.values()))
 
-nbr_list = gen_cclockwise_neighbors(G,"INTPTLON","INTPTLAT")
-edict = get_edge_dict(G)
-faces = find_faces(G,nbr_list)
-dims,idxs,tridict, time = get_dims_and_idx(G,edict,faces)
+    cmap = matplotlib.cm.get_cmap('viridis')
+    clist = [cmap(val) for val in np.linspace(0,1,maxdist+1)]
+    fig, ax = plt.subplots()
+    for currtime in range(maxdist):
+        boundary = [k for k, val in times.items() if val == currtime]
+        boundarytri = [k for k in boundary if dims[k] == 2]
+        boundaryedges = [k for k in boundary if dims[k] == 1]
+        boundaryverts = [k for k in boundary if dims[k] == 0]
+        patches = []
+        if boundaryverts:
+            points = np.array([np.array(pos[k]) for k in boundaryverts])
+            plt.scatter(points[:, 0], points[:, 1], s=5, alpha=0.4, c=clist[currtime])
+        for e in boundaryedges:
+            verts = list(e)
+            beg = np.array(pos[verts[0]])
+            end = np.array(pos[verts[1]])
+            line = mlines.Line2D(np.array([beg[0], end[0]]), np.array([beg[1], end[1]]), lw=1., alpha=0.4,
+                                 c=clist[currtime])
+            ax.add_line(line)
+        for t in boundarytri:
+            poly = np.zeros((3, 2))
+            verts = list(t)
+            for i in np.arange(3):
+                poly[i, :] = np.array(pos[verts[i]])
+            triangle = Polygon(poly, True)
+            patches.append(triangle)
+        p = PatchCollection(patches, alpha=0.4)
+        p.set_color(clist[currtime])
+        ax.add_collection(p)
+    plt.axis([xmin, xmax, ymin, ymax])
+
+    plt.show(block=True)
+
+def compute_ph_boundary_using_graph_distance(gexffile,districtid,latstring,lonstring):
+    """ Computes the persistent homology of an boundary outward march with graph distance
+
+    :param gexffile: location of input gexf
+    :param districtid: identifier for the district whose boundary we're examining
+    :param latstring: string ID for latitude field of centroid
+    :param lonstring: string ID for longitude field of centroid
+    :return:
+    """
+    G = nx.read_gexf(gexfile)
+
+    get_dist_to_boundary(G,districtid)
+
+    nbr_list = gen_cclockwise_neighbors(G,lonstring,latstring)
+    edict = get_edge_dict(G)
+    faces = find_faces(G,nbr_list)
+    dims,idxs,tridict, time = get_dims_and_idx(G,edict,faces)
 
 
-filtration = build_filtered_complex(dims, idxs, edict, tridict, time)
+    filtration = build_filtered_complex(dims, idxs, edict, tridict, time)
 
-plot_simplexes(G,'INTPTLON','INTPTLAT',edict,tridict)
+    plot_simplexes(G,lonstring,latstring,edict,tridict)
+
+    m = d.homology_persistence(filtration)
+
+    dgms = d.init_diagrams(m,filtration)
+    d.plot.plot_bars(dgms[1], show=True)
+
+def build_adj_matrix_percent(datafile, keystring, xstring, ystring, attr_list):
+    data = np.zeros((0,6))
+    G = nx.Graph()
+    idxs = {}
+    idx = 0
+    with open(datafile) as geoid:
+        reader = csv.reader(geoid,delimiter=',')
+        headers = next(reader)
+        key_idx = headers.index(keystring)
+        x_idx = headers.index(xstring)
+        y_idx = headers.index(ystring)
+        dat_idx = [headers.index(dstring) for dstring in attr_list]
+        for row in reader:
+            race = np.array([[float(row[i]) for i in dat_idx]])
+            race = race/np.sum(race)
+            data = np.concatenate((data,race))
+            G.add_node(row[key_idx], pos=(float(row[x_idx]),float(row[y_idx])))
+            idxs[idx] = row[key_idx]
+            idx += 1
+    condenseddist = pdist(data)
+    num_nodes = len(G.nodes())
+    for i in range(num_nodes-1):
+        for j in range(num_nodes-i-1):
+            condensedidx = int(num_nodes*j - j*(j+1)/2 + i - 1 - j)
+            G.add_edge(idxs[i], idxs[i+j+1], weight = condenseddist[condensedidx])
+    return G
 
 
-# for s in filtration:
-#     print(s)
-m = d.homology_persistence(filtration)
 
-dgms = d.init_diagrams(m,filtration)
-# for i, dgm in enumerate(dgms):
-#     for pt in dgm:
-#         print(i, pt.birth, pt.death)
+Gspatial = nx.read_gexf('gexf/DC_tracts.gexf')
+Gdem = build_adj_matrix_percent('rawdata/DC_2010Census_Race.csv','GEOID','xcoord','ycoord',
+                                ['Tract_2010Census_DP1_DP0090001',
+                                 'Tract_2010Census_DP1_DP0090002',
+                                 'Tract_2010Census_DP1_DP0090003',
+                                 'Tract_2010Census_DP1_DP0090004',
+                                 'Tract_2010Census_DP1_DP0090005',
+                                 'Tract_2010Census_DP1_DP0090006'])
+pos = nx.get_node_attributes(Gdem, 'pos')
+xcoord={k:u for k,(u,v) in pos.items()}
+ycoord={k:v for k,(u,v) in pos.items()}
 
-# for i,c in enumerate(m):
-#     if m.pair(i) < i: continue
-#     dim = filtration[i].dimension()
-#     if m.pair(i) != m.unpaired:
-#         birth=filtration[i].data
-#         death=filtration[m.pair(i)].data
-#         if birth!=death:
-#             print(dim,birth,death,c)
-#     else:
-#         print(dim,filtration[i].data,'inf',c)
+nx.set_node_attributes(Gspatial, pos, 'pos')
+nx.set_node_attributes(Gspatial, xcoord, 'xcoord')
+nx.set_node_attributes(Gspatial, ycoord, 'ycoord')
+nbr_list = gen_cclockwise_neighbors(Gspatial,'xcoord', 'ycoord')
+faces_spatial = find_faces(Gspatial,nbr_list)
+tris_spatial = triangulate_faces(faces_spatial)
+edict_dem = get_edge_dict(Gdem)
 
-# for i,c in enumerate(m):
-#     print(i,c)
-d.plot.plot_bars(dgms[1], show=True)
-#
-# for s in filtration:
-#     print(s)
+dims, idxs, times = get_dims_and_idx_from_multiple(Gdem, tris_spatial, .5, 20)
+plot_simplexes_from_multiple(Gdem, dims, times)
+# nx.draw(Gspatial, pos=nx.get_node_attributes(Gspatial,'pos'),node_size=10)
+# nx.draw(Gdem, pos=nx.get_node_attributes(Gdem,'pos'),node_size=10)
+# plt.show(block=True)
+# get_dims_and_idx_from_multiple(G, edict, eweight, faces, 1., 1.)
