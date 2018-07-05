@@ -112,35 +112,39 @@ def get_dist_to_boundary(G, district):
             G.node[target_node]['dist_to_boundary'] = updated_dist if updated_dist < current_dist else current_dist
     return G
 
-def gettriangles(face,verts,edgedict):
+def gettriangles(face,verts,G):
     """For a face with more than 3 vertices, breaks face into triangles
 
     :param face: string ID for the face
     :param verts: list of GeoIDs of vertices in the face in counterclockwise order
-    :param edgedict: dictionary mapping unique edge indexes to the GeoIDs of their endpoints
-    :return: trianglelist, a dictionary mapping triangle IDs to a list of vertices in each triangle, where triangles
+    :param G: networkx graph
+    :return:
+        trianglelist, a dictionary mapping triangle IDs to a list of vertices in each triangle, where triangles
         roughly triangulate the face
+        newedges, list of edge IDs that have been added to the graph for triangulation reasons
     """
     trianglelist={}
     numverts = len(verts)
     newedges = []
     if numverts > 3 and numverts < 40:
         for subidx in range(numverts-2):
-            # print(verts[0],verts[subidx+1],verts[subidx+2])
             if(len(set([verts[0],verts[subidx+1],verts[subidx+2]])))==3:
-            # if True:
                 trianglelist[face+"T"+str(subidx)]=[verts[0],verts[subidx+1],verts[subidx+2]]
-                if lookup_edge_key([verts[0],verts[subidx+2]],edgedict)==0:
-                    edgedict["E"+face+"T"+str(subidx)]=[verts[0],verts[subidx+2]]
-                    # print([verts[0],verts[subidx+2]])
-                    newedges.append("E"+face+"T"+str(subidx))
+                if lookup_edge_key([verts[0],verts[subidx+2]],G)==0:
+                    G.add_edge(verts[0],verts[subidx+2])
+                    e = lookup_edge_key([verts[0],verts[subidx+2]],G)
+                    newedges.append(e)
     else:
         if len(set(verts))==3:
-        # if True:
             trianglelist[face]=verts
     return trianglelist,newedges
 
 def triangulate_faces(facedict):
+    '''triangulate all faces which are not triangular
+
+    :param facedict: dictionary listing unique face IDs with vertices involved in them
+    :return: dictionary of unique triangle IDs with their vertices
+    '''
     triangledict = {}
     idx = 0
     for f in facedict:
@@ -153,7 +157,7 @@ def triangulate_faces(facedict):
             for subidx in range(numverts-2):
                 testtri = [verts[0], verts[subidx+1], verts[subidx+2]]
                 if len(set(testtri)) == 3:
-                    triangledict["T" + str(idx)] = facedict[f]
+                    triangledict["T" + str(idx)] = testtri
                     idx += 1
     return triangledict
 
@@ -171,7 +175,7 @@ def get_edge_dict(G):
         idx+=1
     return edge_dict
 
-def get_dims_and_idx(G,edgedict,faces):
+def get_dims_and_idx(G,edgelist,faces):
     """Build dictionaries that give an order for the entry of every simplex into the filtered simplicial complex
 
     :param G: networkx graph
@@ -181,17 +185,16 @@ def get_dims_and_idx(G,edgedict,faces):
     :return:
         dims: dictionary mapping the ID of each simplex to its dimension
         indexes: dictionary mapping the ID of each simplex to the order in which it enters the simplex
-        tridict: dictionary mapping triangles (2-simplexes) to the list of GeoIDs of their vertices
+        time: dictionary mapping ID of each simplex to time it enters the simplex
     """
     disttobd = nx.get_node_attributes(G,'dist_to_boundary')
     maxdist = max(list(disttobd.values()))
     idx = 0
     dims = {}
     indexes = {}
-    rem_edges=edgedict.copy()
+    rem_edges=list(edgelist)
     rem_faces=faces.copy()
     done_nodes = []
-    tridict={}
     time={}
     for currdist in range(maxdist+1):
         nodes = [key for key,value in disttobd.items() if value==currdist]
@@ -202,32 +205,43 @@ def get_dims_and_idx(G,edgedict,faces):
             done_nodes.append(node)
             idx+=1
             for e in list(rem_edges):
-                everts = rem_edges[e]
+                everts = list(e)
                 if len(set(everts) & set(done_nodes))==2:
                     dims[e]=1
                     indexes[e] = idx
                     time[e] = currdist
-                    rem_edges.pop(e)
+                    rem_edges.remove(e)
                     idx+=1
             for f in list(rem_faces):
                 fverts = rem_faces[f]
                 if len(set(fverts) & set(done_nodes)) == len(set(fverts)):
-                    trilist, newedges = gettriangles(f,fverts,edgedict)
+                    trilist, newedges = gettriangles(f,fverts,G)
                     for e in newedges:
                         dims[e]=1
                         indexes[e] = idx
                         time[e] = currdist
                         idx+=1
                     for t, tverts in trilist.items():
-                        dims[t] = 2
-                        indexes[t] = idx
-                        time[t] = currdist
+                        tkey=tuple(tverts)
+                        dims[tkey] = 2
+                        indexes[tkey] = idx
+                        time[tkey] = currdist
                         idx+=1
-                        tridict[t] = tverts
                     rem_faces.pop(f)
-    return dims, indexes, tridict, time
+    return dims, indexes, time
 
 def get_dims_and_idx_from_multiple(Gedge, faces, maxfiltration, numfiltrations):
+    '''Build dictionaries for dimensions, entry time with edges from one graph and faces from another
+
+    :param Gedge: graph with shared vertices and the edges
+    :param faces: list of faces from another graph with the vertices of each face
+    :param maxfiltration: maximum epsilon for building epsilon balls in the simplicial complex
+    :param numfiltrations: number of filtration steps
+    :return:
+        dims: dimensions of each simplex
+        idx: order that each simplex enters the simplicial complex
+        times: timestep at which each simplex enters the simplicial complex
+    '''
     filtrationwidth = maxfiltration/numfiltrations
     nodes = Gedge.nodes()
     rem_edges = nx.get_edge_attributes(Gedge,'weight')
@@ -254,8 +268,6 @@ def get_dims_and_idx_from_multiple(Gedge, faces, maxfiltration, numfiltrations):
                 rem_edges.pop(e)
         for f in list(rem_faces.keys()):
             if check_face(rem_faces[f], done_edges) == True:
-                # if e == ('11001009601','11001009602'):
-                #     print("Here")
                 fidx = tuple(rem_faces[f])
                 dims[fidx] = 2
                 idxs[fidx] = idx
@@ -264,41 +276,64 @@ def get_dims_and_idx_from_multiple(Gedge, faces, maxfiltration, numfiltrations):
                 rem_faces.pop(f)
     return dims, idxs, times
 
-def lookup_edge_key_2(e, edgedict):
+def lookup_edge_key_dict(e, edgedict):
+    """lookup whether an edge exists in a dictionary of edges with keys given by tuple of vertices
+
+    :param e: list of vertices in the potential edge
+    :param edgedict: dictionary of edges (can have any value)
+    :return:
+        edge: edge id of the found edge
+    """
     for edge in edgedict.keys():
         if set(e) == set(edge):
             return edge
     return 0
 
-def lookup_edge_key(verts,edgedict):
+def lookup_edge_key(verts,G):
     """from two vertices, find the edge ID of the edge between them
 
     :param verts: list of two GeoIDs
-    :param edgedict: dictionary mapping edge IDs to GeoIDs of their endpoints
+    :param G: networkx object with all edges
     :return: edge ID of the edge between the vertices given by verts
     """
-    for e, everts in edgedict.items():
-        if set(everts) == set(verts):
-            return e
+    for edge in G.edges():
+        if set(edge) == set(verts):
+            return edge
     return 0
 
 def check_face(faceverts,edgedict):
-    if lookup_edge_key_2([faceverts[0], faceverts[1]], edgedict) != 0 and lookup_edge_key_2([faceverts[1], faceverts[2]], edgedict) != 0 and lookup_edge_key_2([faceverts[0], faceverts[2]], edgedict) != 0:
+    """check whether all the edges of a face are an a given list of edges
+
+    :param faceverts: vertices of the face in order
+    :param edgedict: dictionary containing all permissible edges
+    :return:
+        True if all edges are contained, False otherwise
+    """
+    if lookup_edge_key_dict([faceverts[0], faceverts[1]], edgedict) != 0 \
+            and lookup_edge_key_dict([faceverts[1], faceverts[2]], edgedict) != 0 \
+            and lookup_edge_key_dict([faceverts[0], faceverts[2]], edgedict) != 0:
         return True
     return False
 
-def build_filtered_complex(dims, indexes, edgedict, tridict, time):
+def build_filtered_complex(dims, indexes, time):
+    """Build a filtered complex from dictionaries giving the dimensions, subsimplices, and times of entry
+
+    :param dims: dictionary with keys giving simplex, values giving dimension
+    :param indexes: Dictionary with keys giving the simplex, value giving the order in which simplex enters
+    :param time: Dictionary with keys giving simplex, value giving time of entry
+    :return:
+    """
     sortedkeys = sorted(indexes, key=indexes.get)
     f = d.Filtration()
     for key in sortedkeys:
         if dims[key]==0:
             f.append(d.Simplex([indexes[key]],time[key]))
         elif dims[key]==1:
-            verts = edgedict[key]
+            verts = list(key)
             vertices = [indexes[v] for v in verts]
             f.append(d.Simplex(vertices, time[key]))
         elif dims[key]==2:
-            verts = tridict[key]
+            verts = list(key)
             vertices = [indexes[v] for v in verts]
             f.append(d.Simplex(vertices, time[key]))
     return f
@@ -331,14 +366,14 @@ def write_simplicial_complex(filename,dims,indexes, edgedict, tridict):
 
     file.close()
 
-def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
+def plot_simplexes_from_boundary(G, xstring, ystring, time, dims):
     """generate plot of colorcoded simplexes by distance from boundary
 
     :param G: network which must contain distance to boundary
     :param xstring:
     :param ystring:
-    :param edgedict: dictionary of all edges and contained vertices
-    :param triangledict: dictionary of all triangles and contained vertices
+    :param dims: dictionary of simplex -> dimension
+    :param times: dictionary of simplex -> entry time
     :return:
     """
     colorlist = []
@@ -353,13 +388,8 @@ def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
     disttobd = nx.get_node_attributes(G, 'dist_to_boundary')
     maxdist = max(list(disttobd.values()))
 
-    clist = ['k'] * (maxdist + 1)
-    clist[0] = 'r'
-    clist[1] = 'b'
-    clist[2] = 'g'
-    clist[3] = 'c'
-    clist[4] = 'm'
-    clist[5] = 'y'
+    cmap = matplotlib.cm.get_cmap('viridis')
+    clist = [cmap(val) for val in np.linspace(0, 1, maxdist + 1)]
     fig, ax = plt.subplots()
     for currdist in range(maxdist + 1):
         boundary = [k for k, val in time.items() if val == currdist]
@@ -370,7 +400,7 @@ def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
         points = np.array([np.array(pos[k]) for k in boundaryverts])
         plt.scatter(points[:, 0], points[:, 1], s=5, c=clist[currdist], alpha=0.4)
         for e in boundaryedges:
-            verts = edgedict[e]
+            verts = list(e)
             beg = np.array(pos[verts[0]])
             end = np.array(pos[verts[1]])
             line = mlines.Line2D(np.array([beg[0], end[0]]), np.array([beg[1], end[1]]), lw=1., alpha=0.4,
@@ -378,7 +408,7 @@ def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
             ax.add_line(line)
         for t in boundarytri:
             poly = np.zeros((3, 2))
-            verts = triangledict[t]
+            verts = list(t)
             for i in np.arange(3):
                 poly[i, :] = np.array(pos[verts[i]])
             triangle = Polygon(poly, True)
@@ -387,8 +417,8 @@ def plot_simplexes(G,xstring,ystring,edgedict,triangledict):
         p.set_color(clist[currdist])
         ax.add_collection(p)
     plt.axis([xmin, xmax, ymin, ymax])
-
-    plt.show(block=True)
+    plt.interactive(False)
+    plt.show()
 
 def plot_simplexes_from_multiple(G_edge,dims,times):
     """generate plot of colorcoded simplexes by distance from boundary
@@ -396,8 +426,8 @@ def plot_simplexes_from_multiple(G_edge,dims,times):
     :param G: network which must contain distance to boundary
     :param xstring:
     :param ystring:
-    :param edgedict: dictionary of all edges and contained vertices
-    :param triangledict: dictionary of all triangles and contained vertices
+    :param dims: dictionary of simplex -> dimension
+    :param times: dictionary of simplex -> entry time
     :return:
     """
 
@@ -437,10 +467,10 @@ def plot_simplexes_from_multiple(G_edge,dims,times):
         p.set_color(clist[currtime])
         ax.add_collection(p)
     plt.axis([xmin, xmax, ymin, ymax])
+    plt.interactive(False)
+    plt.show()
 
-    plt.show(block=True)
-
-def compute_ph_boundary_using_graph_distance(gexffile,districtid,latstring,lonstring):
+def compute_ph_boundary_using_graph_distance(gexfile,districtid,latstring,lonstring):
     """ Computes the persistent homology of an boundary outward march with graph distance
 
     :param gexffile: location of input gexf
@@ -454,14 +484,12 @@ def compute_ph_boundary_using_graph_distance(gexffile,districtid,latstring,lonst
     get_dist_to_boundary(G,districtid)
 
     nbr_list = gen_cclockwise_neighbors(G,lonstring,latstring)
-    edict = get_edge_dict(G)
     faces = find_faces(G,nbr_list)
-    dims,idxs,tridict, time = get_dims_and_idx(G,edict,faces)
+    dims, idxs, time = get_dims_and_idx(G,G.edges(),faces)
 
+    filtration = build_filtered_complex(dims, idxs, time)
 
-    filtration = build_filtered_complex(dims, idxs, edict, tridict, time)
-
-    plot_simplexes(G,lonstring,latstring,edict,tridict)
+    plot_simplexes_from_boundary(G, lonstring, latstring, time, dims)
 
     m = d.homology_persistence(filtration)
 
@@ -469,6 +497,15 @@ def compute_ph_boundary_using_graph_distance(gexffile,districtid,latstring,lonst
     d.plot.plot_bars(dgms[1], show=True)
 
 def build_adj_matrix_percent(datafile, keystring, xstring, ystring, attr_list):
+    """Read in a csv with demographic percentile data
+
+    :param datafile: location of csv
+    :param keystring: GEOID
+    :param xstring:
+    :param ystring:
+    :param attr_list: list of the field IDs for the attributes being examined
+    :return: graph with demographic data attached and edge weights from pairwise distance
+    """
     data = np.zeros((0,6))
     G = nx.Graph()
     idxs = {}
@@ -495,31 +532,45 @@ def build_adj_matrix_percent(datafile, keystring, xstring, ystring, attr_list):
             G.add_edge(idxs[i], idxs[i+j+1], weight = condenseddist[condensedidx])
     return G
 
+def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring, ystring, attrstrings, numfils=20):
+    Gspatial = nx.read_gexf(spatial_gexf)
+    Gdem = build_adj_matrix_percent(dem_csv, idstring, xstring, ystring, attrstrings)
+    pos = nx.get_node_attributes(Gdem, 'pos')
+    xcoord={k:u for k,(u,v) in pos.items()}
+    ycoord={k:v for k,(u,v) in pos.items()}
 
+    nx.set_node_attributes(Gspatial, pos, 'pos')
+    nx.set_node_attributes(Gspatial, xcoord, 'xcoord')
+    nx.set_node_attributes(Gspatial, ycoord, 'ycoord')
+    nbr_list = gen_cclockwise_neighbors(Gspatial,'xcoord', 'ycoord')
+    faces_spatial = find_faces(Gspatial,nbr_list)
+    tris_spatial = triangulate_faces(faces_spatial)
+    weights = nx.get_edge_attributes(Gdem,'weight')
+    maxfil = np.median([w for w in weights.values()])/10.
 
-Gspatial = nx.read_gexf('gexf/DC_tracts.gexf')
-Gdem = build_adj_matrix_percent('rawdata/DC_2010Census_Race.csv','GEOID','xcoord','ycoord',
-                                ['Tract_2010Census_DP1_DP0090001',
-                                 'Tract_2010Census_DP1_DP0090002',
-                                 'Tract_2010Census_DP1_DP0090003',
-                                 'Tract_2010Census_DP1_DP0090004',
-                                 'Tract_2010Census_DP1_DP0090005',
-                                 'Tract_2010Census_DP1_DP0090006'])
-pos = nx.get_node_attributes(Gdem, 'pos')
-xcoord={k:u for k,(u,v) in pos.items()}
-ycoord={k:v for k,(u,v) in pos.items()}
+    dims, idxs, times = get_dims_and_idx_from_multiple(Gdem, tris_spatial, maxfil, numfils)
+    plot_simplexes_from_multiple(Gdem, dims, times)
 
-nx.set_node_attributes(Gspatial, pos, 'pos')
-nx.set_node_attributes(Gspatial, xcoord, 'xcoord')
-nx.set_node_attributes(Gspatial, ycoord, 'ycoord')
-nbr_list = gen_cclockwise_neighbors(Gspatial,'xcoord', 'ycoord')
-faces_spatial = find_faces(Gspatial,nbr_list)
-tris_spatial = triangulate_faces(faces_spatial)
-edict_dem = get_edge_dict(Gdem)
+    filtration = build_filtered_complex(dims, idxs, times)
 
-dims, idxs, times = get_dims_and_idx_from_multiple(Gdem, tris_spatial, .5, 20)
-plot_simplexes_from_multiple(Gdem, dims, times)
-# nx.draw(Gspatial, pos=nx.get_node_attributes(Gspatial,'pos'),node_size=10)
-# nx.draw(Gdem, pos=nx.get_node_attributes(Gdem,'pos'),node_size=10)
-# plt.show(block=True)
-# get_dims_and_idx_from_multiple(G, edict, eweight, faces, 1., 1.)
+    m = d.homology_persistence(filtration)
+
+    dgms = d.init_diagrams(m,filtration)
+    d.plot.plot_bars(dgms[1], show=True)
+
+### EXAMPLE FOR COMPUTING PERSISTENT HOMOLOGY USING A DISTANCE FROM BOUNDARY FILTRATION
+# compute_ph_boundary_using_graph_distance('gexf/wytestgraph2.gexf','00','INTPTLAT','INTPTLON')
+
+### EXAMPLE FOR COMPUTING THE PERSISTENT HOMOLOGY OF A SIMPLICIAL COMPLEX WITH EDGES GIVEN BY DEMOGRAPHIC DISTANCE AND
+### SIMPLICES GIVEN BY SPATIAL DISTANCE
+# compute_ph_dem_spatial_from_percent('gexf/DC_tracts.gexf',
+#                                     'rawdata/DC_2010Census_Race.csv',
+#                                     'GEOID',
+#                                     'xcoord',
+#                                     'ycoord',
+#                                     ['Tract_2010Census_DP1_DP0090001',
+#                                      'Tract_2010Census_DP1_DP0090002',
+#                                      'Tract_2010Census_DP1_DP0090003',
+#                                      'Tract_2010Census_DP1_DP0090004',
+#                                      'Tract_2010Census_DP1_DP0090005',
+#                                      'Tract_2010Census_DP1_DP0090006'])
