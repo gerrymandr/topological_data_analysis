@@ -21,7 +21,12 @@ from scipy.spatial.distance import pdist
 
 def find_angle(y,x):
     """Find angle of a vector with respect to x axis"""
-    theta = math.atan(y/x)
+    if x!=0:
+        theta = math.atan(y/x)
+    elif y>0:
+        theta = math.pi/2
+    else:
+        theta = math.pi*3/2
     if x<0:
         theta = theta + math.pi
     return theta
@@ -440,7 +445,7 @@ def plot_simplexes_from_multiple(G_edge,dims,times):
     cmap = matplotlib.cm.get_cmap('viridis')
     clist = [cmap(val) for val in np.linspace(0,1,maxdist+1)]
     fig, ax = plt.subplots()
-    for currtime in range(maxdist):
+    for currtime in range(maxdist+1):
         boundary = [k for k, val in times.items() if val == currtime]
         boundarytri = [k for k in boundary if dims[k] == 2]
         boundaryedges = [k for k in boundary if dims[k] == 1]
@@ -558,6 +563,42 @@ def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring
     dgms = d.init_diagrams(m,filtration)
     d.plot.plot_bars(dgms[1], show=True)
 
+def run_simple_example():
+    Gspatial = nx.Graph()
+    Gspatial.add_nodes_from(range(9))
+    Gspatial.add_edges_from(
+        [(0, 1), (0, 2), (1, 3), (2, 3), (3, 4), (3, 6), (3, 8), (4, 5), (5, 6), (5, 7), (6, 7), (7, 8)])
+    xcoord = {0: 0., 1: 1., 2: 0., 3: 1., 4: 4., 5: 3., 6: 2., 7: 2., 8: 1., }
+    ycoord = {0: 0., 1: 0., 2: -1., 3: -1., 4: -1., 5: -2., 6: -2., 7: -3., 8: -4.}
+    pos = {k: np.array([xcoord[k], ycoord[k]]) for k in xcoord.keys()}
+    nx.set_node_attributes(Gspatial, xcoord, 'xcoord')
+    nx.set_node_attributes(Gspatial, ycoord, 'ycoord')
+    nx.set_node_attributes(Gspatial, pos, 'pos')
+
+    Gdem = nx.Graph()
+    Gdem.add_nodes_from(range(9))
+    Gdem.add_weighted_edges_from(
+        [(0, 1, .1), (0, 2, .1), (0, 3, .2), (1, 3, .1), (2, 3, 0.1), (3, 4, .1), (4, 8, 0.1), (3, 8, .1), (5, 6, .2),
+         (5, 7, .1), (6, 7, .1)])
+    nx.set_node_attributes(Gdem, xcoord, 'xcoord')
+    nx.set_node_attributes(Gdem, ycoord, 'ycoord')
+    nx.set_node_attributes(Gdem, pos, 'pos')
+    nbr_list = gen_cclockwise_neighbors(Gspatial, 'xcoord', 'ycoord')
+    nbr_list = {k: [int(i) for i in v] for k, v in nbr_list.items()}
+    faces_spatial = find_faces(Gspatial, nbr_list)
+    tris_spatial = triangulate_faces(faces_spatial)
+    weights = nx.get_edge_attributes(Gdem, 'weight')
+
+    dims, idxs, times = get_dims_and_idx_from_multiple(Gdem, tris_spatial, 1., 20)
+    plot_simplexes_from_multiple(Gdem, dims, times)
+
+    filtration = build_filtered_complex(dims, idxs, times)
+
+    m = d.homology_persistence(filtration)
+
+    dgms = d.init_diagrams(m,filtration)
+    d.plot.plot_bars(dgms[1], show=True)
+
 ### EXAMPLE FOR COMPUTING PERSISTENT HOMOLOGY USING A DISTANCE FROM BOUNDARY FILTRATION
 # compute_ph_boundary_using_graph_distance('gexf/wytestgraph2.gexf','00','INTPTLAT','INTPTLON')
 
@@ -574,3 +615,6 @@ def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring
 #                                      'Tract_2010Census_DP1_DP0090004',
 #                                      'Tract_2010Census_DP1_DP0090005',
 #                                      'Tract_2010Census_DP1_DP0090006'])
+
+### EXTREMELY SIMPLE EXAMPLE
+# run_simple_example()
