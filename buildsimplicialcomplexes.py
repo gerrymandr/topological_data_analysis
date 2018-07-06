@@ -538,6 +538,18 @@ def build_adj_matrix_percent(datafile, keystring, xstring, ystring, attr_list):
     return G
 
 def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring, ystring, attrstrings, numfils=20):
+    """runs persistent homology on the simplicial complex with edges from one graph and faces from another. Requires
+    demographic data to be percentile
+
+    :param spatial_gexf: path to gexf of rook adjacency
+    :param dem_csv: path to csv with demographic data
+    :param idstring:
+    :param xstring:
+    :param ystring:
+    :param attrstrings: list of desired demographic attributes
+    :param numfils:
+    :return:
+    """
     Gspatial = nx.read_gexf(spatial_gexf)
     Gdem = build_adj_matrix_percent(dem_csv, idstring, xstring, ystring, attrstrings)
     pos = nx.get_node_attributes(Gdem, 'pos')
@@ -564,6 +576,7 @@ def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring
     d.plot.plot_bars(dgms[1], show=True)
 
 def run_simple_example():
+    """runs a simple illustrative example"""
     Gspatial = nx.Graph()
     Gspatial.add_nodes_from(range(9))
     Gspatial.add_edges_from(
