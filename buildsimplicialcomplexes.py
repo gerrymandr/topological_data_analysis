@@ -94,6 +94,21 @@ def find_faces(G, nbr_lists):
 #    print(len(faces))
     return faces
 
+def get_faces_from_distance(G, dist):
+    H = nx.Graph(((u,v, weight) for u, v, weight in G.edges(data=True) if weight['weight'] < dist))
+    faces = set([])
+    facedict = {}
+    idx = 0
+    for (u,v) in H.edges():
+        uneighbors = H.neighbors(u)
+        vneighbors = H.neighbors(v)
+        mutual = list(set(vneighbors) & set(uneighbors))
+        for w in mutual:
+            faces.add(frozenset([u,v,w]))
+    for f in faces:
+        facedict["F" + str(idx)] = list(f)
+        idx+=1
+    return facedict
 
 def get_boundary_nodes(G, district):
     #takes in VTD adjacency graph G and district identifier (string),
@@ -537,7 +552,21 @@ def build_adj_matrix_percent(datafile, keystring, xstring, ystring, attr_list):
             G.add_edge(idxs[i], idxs[i+j+1], weight = condenseddist[condensedidx])
     return G
 
-def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring, ystring, attrstrings, numfils=20):
+def build_spatial_graph_with_weights(G, xstring, ystring):
+    nodeidx=0
+    idxs={}
+    num_nodes = len(G.nodes)
+    for n in G.nodes:
+        idxs[nodeidx] = n
+        nodeidx+=1
+    data = np.array([np.array([G.node[n][xstring],G.node[n][ystring]]) for n in G.nodes()])
+    condenseddist = pdist(data)
+    for i in range(num_nodes-1):
+        for j in range(num_nodes-i-1):
+            condensedidx = int(num_nodes*j - j*(j+1)/2 + i - 1 - j)
+            G.add_edge(idxs[i], idxs[i+j+1], weight = condenseddist[condensedidx])
+
+def compute_ph_dem_edge_spatial_face_from_percent(spatial_gexf, dem_csv, idstring, xstring, ystring, attrstrings, numfils=20):
     """runs persistent homology on the simplicial complex with edges from one graph and faces from another. Requires
     demographic data to be percentile
 
@@ -575,6 +604,44 @@ def compute_ph_dem_spatial_from_percent(spatial_gexf, dem_csv, idstring, xstring
     dgms = d.init_diagrams(m,filtration)
     d.plot.plot_bars(dgms[1], show=True)
 
+def compute_ph_spatial_edge_dem_face_from_percent(spatial_gexf, dem_csv, idstring, xstring, ystring, attrstrings, numfils=20):
+    """runs persistent homology on the simplicial complex with edges from a spatial graph and faces from demographic distance. Requires
+    demographic data to be percentile
+
+    :param spatial_gexf: path to gexf of rook adjacency
+    :param dem_csv: path to csv with demographic data
+    :param idstring:
+    :param xstring:
+    :param ystring:
+    :param attrstrings: list of desired demographic attributes
+    :param numfils:
+    :return:
+    """
+    Gspatial = nx.read_gexf(spatial_gexf)
+    Gdem = build_adj_matrix_percent(dem_csv, idstring, xstring, ystring, attrstrings)
+    pos = nx.get_node_attributes(Gdem, 'pos')
+    xcoord={k:u for k,(u,v) in pos.items()}
+    ycoord={k:v for k,(u,v) in pos.items()}
+
+    nx.set_node_attributes(Gspatial, pos, 'pos')
+    nx.set_node_attributes(Gspatial, xcoord, 'xcoord')
+    nx.set_node_attributes(Gspatial, ycoord, 'ycoord')
+    build_spatial_graph_with_weights(Gspatial,'xcoord','ycoord')
+
+    weights = nx.get_edge_attributes(Gspatial,'weight')
+    maxfil = np.median([w for w in weights.values()])/10.
+    faces_dem = get_faces_from_distance(Gdem,maxfil)
+
+    dims, idxs, times = get_dims_and_idx_from_multiple(Gspatial, faces_dem, maxfil, numfils)
+    plot_simplexes_from_multiple(Gdem, dims, times)
+
+    filtration = build_filtered_complex(dims, idxs, times)
+
+    m = d.homology_persistence(filtration)
+
+    dgms = d.init_diagrams(m,filtration)
+    d.plot.plot_bars(dgms[1], show=True)
+
 def run_simple_example():
     """runs a simple illustrative example"""
     Gspatial = nx.Graph()
@@ -600,7 +667,6 @@ def run_simple_example():
     nbr_list = {k: [int(i) for i in v] for k, v in nbr_list.items()}
     faces_spatial = find_faces(Gspatial, nbr_list)
     tris_spatial = triangulate_faces(faces_spatial)
-    weights = nx.get_edge_attributes(Gdem, 'weight')
 
     dims, idxs, times = get_dims_and_idx_from_multiple(Gdem, tris_spatial, 1., 20)
     plot_simplexes_from_multiple(Gdem, dims, times)
@@ -631,3 +697,15 @@ def run_simple_example():
 
 ### EXTREMELY SIMPLE EXAMPLE
 # run_simple_example()
+
+compute_ph_spatial_edge_dem_face_from_percent('gexf/DC_tracts.gexf',
+                                              'rawdata/DC_2010Census_Race.csv',
+                                              'GEOID',
+                                              'xcoord',
+                                              'ycoord',
+                                              ['Tract_2010Census_DP1_DP0090001',
+                                               'Tract_2010Census_DP1_DP0090002',
+                                               'Tract_2010Census_DP1_DP0090003',
+                                               'Tract_2010Census_DP1_DP0090004',
+                                               'Tract_2010Census_DP1_DP0090005',
+                                               'Tract_2010Census_DP1_DP0090006'])
